@@ -13,6 +13,7 @@ from typing import Any, Callable
 from loguru import logger
 
 from nanobot.agent.hook import AgentHook, AgentHookContext
+from nanobot.agent.tools.audit import AuditEvent, AuditTool
 from nanobot.agent.tools.registry import ToolRegistry
 from nanobot.providers.base import LLMProvider, LLMResponse, ToolCallRequest
 from nanobot.utils.file_edit_events import (
@@ -108,6 +109,7 @@ class AgentRunSpec:
     llm_timeout_s: float | None = None
     goal_active_predicate: Callable[[], bool] | None = None
     goal_continue_message: str | None = None
+    audit: AuditTool | None = None
 
 
 @dataclass(slots=True)
@@ -367,6 +369,16 @@ class AgentRunner:
                 tool_events.extend(new_events)
                 context.tool_results = list(results)
                 context.tool_events = list(new_events)
+                # --- audit: emit after every tool batch completes ---
+                if spec.audit is not None and spec.audit.enabled:
+                    for ev in new_events:
+                        await spec.audit.record(AuditEvent(
+                            tool=ev.get("name", "?"),
+                            status=ev.get("status", "?"),
+                            detail=ev.get("detail", ""),
+                            iteration=iteration,
+                            session_key=spec.session_key,
+                        ))
                 completed_tool_results: list[dict[str, Any]] = []
                 for tool_call, result in zip(response.tool_calls, results):
                     tool_message = {
